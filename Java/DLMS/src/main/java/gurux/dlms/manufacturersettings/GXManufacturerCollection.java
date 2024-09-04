@@ -36,6 +36,8 @@ package gurux.dlms.manufacturersettings;
 
 import static android.content.Context.MODE_PRIVATE;
 
+import static gurux.dlms.utils.SecurityUtil.getHttpsURLConnection;
+
 import android.content.Context;
 import android.hardware.usb.UsbDevice;
 import android.os.Parcel;
@@ -62,6 +64,8 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.jar.Attributes;
+
+import javax.net.ssl.HttpsURLConnection;
 
 import gurux.dlms.enums.InterfaceType;
 import gurux.dlms.enums.ObjectType;
@@ -124,7 +128,7 @@ public class GXManufacturerCollection
                 DateFormat format = new SimpleDateFormat("MM-dd-yyyy");
                 try (java.io.FileInputStream tmp = context.openFileInput("files.xml")) {
                     XmlPullParser parser = Xml.newPullParser();
-                    URL url = new URL("https://www.gurux.fi/obis/files.xml");
+                    URL url = new URL("https://192.168.137.1/obis/files.xml");//https://www.gurux.fi/obis/files.xml
                     parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false);
                     parser.setInput(tmp, null);
                     int event;
@@ -138,20 +142,40 @@ public class GXManufacturerCollection
                             }
                         }
                     }
-                    URLConnection c = url.openConnection();
-                    try (InputStream io = c.getInputStream()) {
-                        parser.setInput(io, null);
-                        parser.nextTag();
-                        while ((event = parser.next()) != XmlPullParser.END_TAG) {
-                            if (event == XmlPullParser.START_TAG) {
-                                String target = parser.getName();
-                                if (target.equalsIgnoreCase("file")) {
-                                    String data = parser.getAttributeValue(null, "Modified");
-                                    available.put(readText(parser), format.parse(data));
+
+
+                    if(url.getProtocol().toLowerCase().equals("https")) {//调试用证书
+                        HttpsURLConnection urlConnection = getHttpsURLConnection(context, url);
+                        try (InputStream io = urlConnection.getInputStream()) {
+                            parser.setInput(io, null);
+                            parser.nextTag();
+                            while ((event = parser.next()) != XmlPullParser.END_TAG) {
+                                if (event == XmlPullParser.START_TAG) {
+                                    String target = parser.getName();
+                                    if (target.equalsIgnoreCase("file")) {
+                                        String data = parser.getAttributeValue(null, "Modified");
+                                        available.put(readText(parser), format.parse(data));
+                                    }
+                                }
+                            }
+                        }
+                    }else{
+                        URLConnection c = url.openConnection();
+                        try (InputStream io = c.getInputStream()) {
+                            parser.setInput(io, null);
+                            parser.nextTag();
+                            while ((event = parser.next()) != XmlPullParser.END_TAG) {
+                                if (event == XmlPullParser.START_TAG) {
+                                    String target = parser.getName();
+                                    if (target.equalsIgnoreCase("file")) {
+                                        String data = parser.getAttributeValue(null, "Modified");
+                                        available.put(readText(parser), format.parse(data));
+                                    }
                                 }
                             }
                         }
                     }
+
                     for (Map.Entry<String, Date> it : available.entrySet()) {
                         // If new item is added.
                         if (!installed.containsKey(it.getKey())) {
@@ -201,23 +225,45 @@ public class GXManufacturerCollection
             try {
                 String line, newline;
                 String path = "files.xml";
-                URL url = new URL("https://www.gurux.fi/obis/files.xml");
-                URLConnection c = url.openConnection();
-                c.setDoInput(true);
-                c.setDoOutput(true);
-                try (InputStream io = c.getInputStream()) {
-                    try (InputStreamReader r = new InputStreamReader(io, StandardCharsets.UTF_8)) {
-                        BufferedReader reader = new BufferedReader(r);
-                        try (FileOutputStream writer = context.openFileOutput(path, MODE_PRIVATE)) {
-                            newline = System.getProperty("line.separator");
-                            while ((line = reader.readLine()) != null) {
-                                writer.write(line.getBytes());
-                                writer.write(newline.getBytes());
+                URL url = new URL("https://192.168.137.1/obis/files.xml");//https://www.gurux.fi/obis/files.xml
+
+                if(url.getProtocol().toLowerCase().equals("https")) {//调试用证书
+                    HttpsURLConnection urlConnection = getHttpsURLConnection(context, url);
+                    //urlConnection.setDoInput(true);
+                    //urlConnection.setDoOutput(true);这两句注释掉就可以访问了，后面查下为什么？
+                    try (InputStream io = urlConnection.getInputStream()) {
+                        try (InputStreamReader r = new InputStreamReader(io, StandardCharsets.UTF_8)) {
+                            BufferedReader reader = new BufferedReader(r);
+                            try (FileOutputStream writer = context.openFileOutput(path, MODE_PRIVATE)) {
+                                newline = System.getProperty("line.separator");
+                                while ((line = reader.readLine()) != null) {
+                                    writer.write(line.getBytes());
+                                    writer.write(newline.getBytes());
+                                }
+                                r.close();
                             }
-                            r.close();
+                        }
+                    }
+                }else{
+                    URLConnection c = url.openConnection();
+                    c.setDoInput(true);
+                    c.setDoOutput(true);
+                    try (InputStream io = c.getInputStream()) {
+                        try (InputStreamReader r = new InputStreamReader(io, StandardCharsets.UTF_8)) {
+                            BufferedReader reader = new BufferedReader(r);
+                            try (FileOutputStream writer = context.openFileOutput(path, MODE_PRIVATE)) {
+                                newline = System.getProperty("line.separator");
+                                while ((line = reader.readLine()) != null) {
+                                    writer.write(line.getBytes());
+                                    writer.write(newline.getBytes());
+                                }
+                                r.close();
+                            }
                         }
                     }
                 }
+
+
                 XmlPullParser parser = Xml.newPullParser();
                 try (java.io.FileInputStream tmp = context.openFileInput(path)) {
                     parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false);
@@ -229,17 +275,35 @@ public class GXManufacturerCollection
                             String target = parser.getName();
                             if (target.equalsIgnoreCase("file")) {
                                 String file = readText(parser);
-                                URL f = new URL("https://www.gurux.fi/obis/" + file);
-                                c = f.openConnection();
-                                try (BufferedReader reader = new BufferedReader(new InputStreamReader(c.getInputStream()))) {
-                                    try (FileOutputStream writer = context.openFileOutput(file, MODE_PRIVATE)) {
-                                        while ((line = reader.readLine()) != null) {
-                                            writer.write(line.getBytes());
-                                            writer.write(newline.getBytes());
+                                URL f = new URL("https://192.168.137.1/obis/" + file);//https://www.gurux.fi/obis/
+
+                                if(url.getProtocol().toLowerCase().equals("https")) {//调试用证书
+                                    HttpsURLConnection fConnection = getHttpsURLConnection(context, f);
+                                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(fConnection.getInputStream()))) {
+                                        try (FileOutputStream writer = context.openFileOutput(file, MODE_PRIVATE)) {
+                                            while ((line = reader.readLine()) != null) {
+                                                writer.write(line.getBytes());
+                                                writer.write(newline.getBytes());
+                                            }
+                                            reader.close();
                                         }
-                                        reader.close();
+                                    }
+
+                                }else{
+                                    URLConnection c=null;
+                                    c = f.openConnection();
+                                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(c.getInputStream()))) {
+                                        try (FileOutputStream writer = context.openFileOutput(file, MODE_PRIVATE)) {
+                                            while ((line = reader.readLine()) != null) {
+                                                writer.write(line.getBytes());
+                                                writer.write(newline.getBytes());
+                                            }
+                                            reader.close();
+                                        }
                                     }
                                 }
+
+
                             }
                         }
                     }

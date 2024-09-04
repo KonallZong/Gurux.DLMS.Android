@@ -2,7 +2,12 @@ package gurux.dlms;
 
 import static android.content.Context.MODE_PRIVATE;
 
+import static gurux.dlms.utils.SecurityUtil.getHttpsURLConnection;
+
 import android.content.Context;
+import android.content.res.Resources;
+
+import androidx.annotation.NonNull;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
@@ -16,12 +21,24 @@ import java.math.BigInteger;
 import java.net.URL;
 import java.net.URLConnection;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyManagementException;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManagerFactory;
 
 import gurux.dlms.asn.enums.KeyUsage;
 import gurux.dlms.enums.DataType;
@@ -91,10 +108,12 @@ public class GXDLMSConverter {
                 try {
                     String line, newline;
                     String path = "obiscodes.txt";
-                    URL url = new URL("https://192.168.137.1/obis/obiscodes.txt");//https://www.gurux.fi/obis/obiscodes.txt
-                    URLConnection c = url.openConnection();
-                    try (InputStream io = c.getInputStream()) {
-                        try (InputStreamReader r = new InputStreamReader(io, StandardCharsets.UTF_8)) {
+                    URL url = new URL("https://192.168.137.1/obis/obiscodes.txt");//https://www.gurux.fi/obis/obiscodes.txt  https://192.168.137.1/obis/obiscodes.txt
+
+                    if(url.getProtocol().toLowerCase().equals("https")){//调试用证书
+                        HttpsURLConnection urlConnection = getHttpsURLConnection(context, url);
+                        InputStream ins = urlConnection.getInputStream();
+                        try (InputStreamReader r = new InputStreamReader(ins, StandardCharsets.UTF_8)) {
                             BufferedReader reader = new BufferedReader(r);
                             try (FileOutputStream writer = context.openFileOutput(path, MODE_PRIVATE)) {
                                 newline = System.getProperty("line.separator");
@@ -104,7 +123,24 @@ public class GXDLMSConverter {
                                 }
                             }
                         }
+
+
+                    }else{
+                        URLConnection c = url.openConnection();
+                        try (InputStream io = c.getInputStream()) {
+                            try (InputStreamReader r = new InputStreamReader(io, StandardCharsets.UTF_8)) {
+                                BufferedReader reader = new BufferedReader(r);
+                                try (FileOutputStream writer = context.openFileOutput(path, MODE_PRIVATE)) {
+                                    newline = System.getProperty("line.separator");
+                                    while ((line = reader.readLine()) != null) {
+                                        writer.write(line.getBytes());
+                                        writer.write(newline.getBytes());
+                                    }
+                                }
+                            }
+                        }
                     }
+
                 } catch (Exception e) {
                     mException[0] = e;
                 }
@@ -119,6 +155,8 @@ public class GXDLMSConverter {
         }
         readStandardObisInfo(context, Standard.DLMS, codes);
     }
+
+
 
     /**
      * Get OBIS code description.
